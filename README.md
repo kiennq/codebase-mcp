@@ -13,9 +13,33 @@ This MCP allows AI Agents like Cursor's Composer Agent to automatically read and
 
 ## Installation
 
+### From NPM (Recommended)
+
 ```bash
 # Install the package globally
 npm install -g codebase-mcp
+
+# Install RepoMix (required dependency)
+codebase-mcp install
+```
+
+### From GitHub
+
+```bash
+# Clone the repository
+git clone https://github.com/DeDeveloper23/codebase-mcp.git
+
+# Navigate to the project directory
+cd codebase-mcp
+
+# Install dependencies
+npm install
+
+# Build the project
+npm run build
+
+# Install globally
+npm install -g .
 
 # Install RepoMix (required dependency)
 codebase-mcp install
