@@ -1,159 +1,81 @@
-import WebSocket from "ws";
+#!/usr/bin/env node
+import { execSync } from 'child_process';
+import { join, dirname } from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(global as any).WebSocket = WebSocket;
+/**
+ * Entry point for the codebase-mcp CLI
+ */
 
-import express from "express";
-import { Client } from "./client/index.js";
-import { SSEClientTransport } from "./client/sse.js";
-import { StdioClientTransport } from "./client/stdio.js";
-import { WebSocketClientTransport } from "./client/websocket.js";
-import { Server } from "./server/index.js";
-import { SSEServerTransport } from "./server/sse.js";
-import { StdioServerTransport } from "./server/stdio.js";
-import { ListResourcesResultSchema } from "./types.js";
+// Get the equivalent of __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-async function runClient(url_or_command: string, args: string[]) {
-  const client = new Client(
-    {
-      name: "mcp-typescript test client",
-      version: "0.1.0",
-    },
-    {
-      capabilities: {
-        sampling: {},
-      },
-    },
-  );
+// The first arg after node executable and script name
+const command = process.argv[2];
 
-  let clientTransport;
-
-  let url: URL | undefined = undefined;
-  try {
-    url = new URL(url_or_command);
-  } catch {
-    // Ignore
-  }
-
-  if (url?.protocol === "http:" || url?.protocol === "https:") {
-    clientTransport = new SSEClientTransport(new URL(url_or_command));
-  } else if (url?.protocol === "ws:" || url?.protocol === "wss:") {
-    clientTransport = new WebSocketClientTransport(new URL(url_or_command));
-  } else {
-    clientTransport = new StdioClientTransport({
-      command: url_or_command,
-      args,
-    });
-  }
-
-  console.log("Connected to server.");
-
-  await client.connect(clientTransport);
-  console.log("Initialized.");
-
-  await client.request({ method: "resources/list" }, ListResourcesResultSchema);
-
-  await client.close();
-  console.log("Closed.");
+if (!command) {
+  console.log('Usage: codebase-mcp <command>');
+  console.log('Commands:');
+  console.log('  start - Start the MCP server');
+  console.log('  install - Install Repomix globally');
+  console.log('  version - Show version information');
+  process.exit(1);
 }
 
-async function runServer(port: number | null) {
-  if (port !== null) {
-    const app = express();
-
-    let servers: Server[] = [];
-
-    app.get("/sse", async (req, res) => {
-      console.log("Got new SSE connection");
-
-      const transport = new SSEServerTransport("/message", res);
-      const server = new Server(
-        {
-          name: "mcp-typescript test server",
-          version: "0.1.0",
-        },
-        {
-          capabilities: {},
-        },
-      );
-
-      servers.push(server);
-
-      server.onclose = () => {
-        console.log("SSE connection closed");
-        servers = servers.filter((s) => s !== server);
-      };
-
-      await server.connect(transport);
-    });
-
-    app.post("/message", async (req, res) => {
-      console.log("Received message");
-
-      const sessionId = req.query.sessionId as string;
-      const transport = servers
-        .map((s) => s.transport as SSEServerTransport)
-        .find((t) => t.sessionId === sessionId);
-      if (!transport) {
-        res.status(404).send("Session not found");
-        return;
-      }
-
-      await transport.handlePostMessage(req, res);
-    });
-
-    app.listen(port, () => {
-      console.log(`Server running on http://localhost:${port}/sse`);
-    });
-  } else {
-    const server = new Server(
-      {
-        name: "mcp-typescript test server",
-        version: "0.1.0",
-      },
-      {
-        capabilities: {
-          prompts: {},
-          resources: {},
-          tools: {},
-          logging: {},
-        },
-      },
-    );
-
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-
-    console.log("Server running on stdio");
-  }
-}
-
-const args = process.argv.slice(2);
-const command = args[0];
-switch (command) {
-  case "client":
-    if (args.length < 2) {
-      console.error("Usage: client <server_url_or_command> [args...]");
+switch (command.toLowerCase()) {
+  case 'start':
+    console.log('Starting Codebase MCP Server...');
+    try {
+      // Use dynamic import instead of require
+      import('./tools/codebase.js').catch((err) => {
+        console.error('Failed to import MCP server:', err);
+        process.exit(1);
+      });
+    } catch (err) {
+      console.error('Failed to start MCP server:', err);
       process.exit(1);
     }
-
-    runClient(args[1], args.slice(2)).catch((error) => {
-      console.error(error);
-      process.exit(1);
-    });
-
     break;
 
-  case "server": {
-    const port = args[1] ? parseInt(args[1]) : null;
-    runServer(port).catch((error) => {
-      console.error(error);
+  case 'install':
+    console.log('Installing Repomix globally...');
+    try {
+      execSync('npm install -g repomix', { stdio: 'inherit' });
+      console.log('Repomix installed successfully!');
+    } catch (err) {
+      console.error('Failed to install Repomix:', err);
       process.exit(1);
-    });
-
+    }
     break;
-  }
+
+  case 'version':
+    try {
+      // Read package.json using fs instead of require
+      const packageJsonPath = join(__dirname, '..', 'package.json');
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+      console.log(`codebase-mcp version: ${packageJson.version}`);
+      
+      try {
+        const repomixVersion = execSync('npx repomix --version').toString().trim();
+        console.log(`Repomix version: ${repomixVersion}`);
+      } catch {
+        // Ignore error and just show Repomix is not available
+        console.log('Repomix is not installed or not available in PATH');
+      }
+    } catch (err) {
+      console.error('Failed to get version information:', err);
+      process.exit(1);
+    }
+    break;
 
   default:
-    console.error("Unrecognized command:", command);
+    console.log(`Unknown command: ${command}`);
+    console.log('Usage: codebase-mcp <command>');
+    console.log('Commands:');
+    console.log('  start - Start the MCP server');
+    console.log('  install - Install Repomix globally');
+    console.log('  version - Show version information');
+    process.exit(1);
 }
